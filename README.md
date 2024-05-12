@@ -45,3 +45,16 @@ Requirements:
 - Each page should contain a configurable number of records.
 
 - Implement proper error handling and response formatting for the API endpoints
+
+# Updated 
+## 1. Replaced Mux with Gin
+## 2. Added Air for auto live reload on save
+
+### Setup - Auto Reloading Server
+1. Clone repo and run `go mod tidy`
+2. complete air setup by following this - `https://github.com/cosmtrek/air`
+3. run `air` in project root directory 
+
+### Setup - Manaul Server Update
+1. Clone repo and run `go mod tidy`
+3. run `go run main.go` in project root directory 
