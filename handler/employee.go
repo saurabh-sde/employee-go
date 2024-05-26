@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,6 +15,9 @@ import (
 	"github.com/saurabh-sde/employee-go/model"
 	"github.com/saurabh-sde/employee-go/utility"
 	"github.com/spf13/cast"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var mutex sync.Mutex
@@ -31,9 +36,9 @@ func CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	defer mutex.Unlock()
 
 	// For simplicity, just use a counter on len of map
-	emp.ID = len(model.EmployeesDB) + 1
+	emp.EmployeeID = len(model.EmployeesDB) + 1
 
-	model.EmployeesDB[emp.ID] = emp
+	model.EmployeesDB[emp.EmployeeID] = emp
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(emp)
@@ -74,12 +79,12 @@ func UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if _, ok := model.EmployeesDB[emp.ID]; !ok {
+	if _, ok := model.EmployeesDB[emp.EmployeeID]; !ok {
 		http.Error(w, "Employee not found", http.StatusNotFound)
 		return
 	}
 
-	model.EmployeesDB[emp.ID] = emp
+	model.EmployeesDB[emp.EmployeeID] = emp
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(emp)
@@ -143,7 +148,7 @@ func GetAllEmployees(w http.ResponseWriter, r *http.Request) {
 
 	// sort according to empID
 	sort.Slice(employees, func(i, j int) bool {
-		return employees[i].ID < employees[j].ID
+		return employees[i].EmployeeID < employees[j].EmployeeID
 	})
 
 	if startIndex < len(employees) {
@@ -177,10 +182,42 @@ func CreateEmployeeGin(c *gin.Context) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	// For simplicity, just use a counter on len of map
-	emp.ID = len(model.EmployeesDB) + 1
+	employees := []model.Employee{}
+	employeeColl := model.Db.Collection("employee")
 
-	model.EmployeesDB[emp.ID] = emp
+	sorter := bson.D{{"employee_id", 1}}
+	opts := options.Find().SetSort(sorter)
+	cursor, err := employeeColl.Find(c, bson.D{}, opts)
+	if err != nil {
+		err := errors.New("Employees not found")
+		c.JSON(http.StatusInternalServerError, err)
+		return
+	}
+
+	if err = cursor.All(c, &employees); err != nil {
+		err := errors.New("Employee not found")
+		c.JSON(http.StatusInternalServerError, err)
+		return
+	}
+	if len(employees) == 0 {
+		emp.EmployeeID = 1
+	} else {
+		emp.EmployeeID = employees[len(employees)-1].EmployeeID + 1
+	}
+	empData := model.Employee{
+		EmployeeID: emp.EmployeeID,
+		Name:       emp.Name,
+		Position:   emp.Position,
+		Salary:     emp.Salary,
+	}
+	result, err := employeeColl.InsertOne(c, empData)
+	if err != nil {
+		utility.Error(err)
+		c.JSON(http.StatusBadRequest, err)
+		return
+	}
+	utility.Print("Insert: ", result)
+
 	c.JSON(http.StatusOK, gin.H{"employee": emp})
 }
 
@@ -192,14 +229,24 @@ func GetEmployeeByIDGin(c *gin.Context) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	emp, ok := model.EmployeesDB[cast.ToInt(id)]
-	if !ok {
-		err := errors.New("Employee not found")
-		c.JSON(http.StatusNotFound, err)
-		return
+	employeeColl := model.Db.Collection("employee")
+	var result model.Employee
+	err := employeeColl.FindOne(context.TODO(), bson.D{{"employee_id", cast.ToInt(id)}}).Decode(&result)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			err := errors.New("Employee not found")
+			c.JSON(http.StatusNotFound, err)
+			return
+		} else {
+			err := errors.New("Employee not found")
+			c.JSON(http.StatusInternalServerError, err)
+			return
+		}
 	}
+	res, _ := bson.MarshalExtJSON(result, false, false)
+	fmt.Println("emp: ", string(res))
 
-	c.JSON(http.StatusOK, emp)
+	c.JSON(http.StatusOK, result)
 }
 
 // UpdateEmployee handler function
@@ -210,19 +257,17 @@ func UpdateEmployeeGin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, err)
 		return
 	}
-
+	utility.Print("upadate", emp)
 	// acquire lock to handle concurrent race conditions
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if _, ok := model.EmployeesDB[emp.ID]; !ok {
-		err = errors.New("Employee not found")
-		c.JSON(http.StatusNotFound, err)
-		return
-	}
-
-	model.EmployeesDB[emp.ID] = emp
-
+	empColl := model.Db.Collection("employee")
+	filter := bson.D{{"employee_id", emp.EmployeeID}}
+	updateQuery := bson.D{{"$set", bson.D{{"name", emp.Name}, {"position", emp.Position}, {"salary", emp.Salary}}}}
+	result, err := empColl.UpdateOne(context.TODO(), filter, updateQuery)
+	utility.Print("Documents matched: %v", result.MatchedCount)
+	utility.Print("Documents updated: %v", result.ModifiedCount)
 	c.JSON(http.StatusOK, emp)
 }
 
@@ -234,14 +279,20 @@ func DeleteEmployeeGin(c *gin.Context) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	_, ok := model.EmployeesDB[cast.ToInt(empID)]
-	if !ok {
-		err := errors.New("Employee not found")
-		c.JSON(http.StatusNotFound, err)
-		return
+	employeeColl := model.Db.Collection("employee")
+	rslt, err := employeeColl.DeleteOne(context.TODO(), bson.D{{"employee_id", cast.ToInt(empID)}})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			err := errors.New("Employee not found")
+			c.JSON(http.StatusNotFound, err)
+			return
+		} else {
+			err := errors.New("Employee not found")
+			c.JSON(http.StatusInternalServerError, err)
+			return
+		}
 	}
-
-	delete(model.EmployeesDB, cast.ToInt(empID))
+	utility.Print("emp:delete: ", rslt.DeletedCount)
 
 	c.JSON(http.StatusOK, "Deleted Employee: "+empID)
 }
@@ -270,16 +321,30 @@ func GetAllEmployeesGin(c *gin.Context) {
 
 	// prepare employees arr
 	employees := []model.Employee{}
-	for _, emp := range model.EmployeesDB {
-		employees = append(employees, emp)
+	employeeColl := model.Db.Collection("employee")
 
+	sorter := bson.D{{"employee_id", 1}}
+	opts := options.Find().SetSort(sorter)
+	cursor, err := employeeColl.Find(c, bson.D{}, opts)
+	if err != nil {
+		err := errors.New("Employees not found")
+		c.JSON(http.StatusInternalServerError, err)
+		return
 	}
+
+	if err = cursor.All(c, &employees); err != nil {
+		err := errors.New("Employee not found")
+		c.JSON(http.StatusInternalServerError, err)
+		return
+	}
+	utility.Print(employees)
+
 	// returning resp based employee ID between range is wrong as there is delete emp also
 	// so prepare arr of emp sort it on empId and then return required resp b/w resp = employees[start:end]
 
-	// sort according to empID
+	// Sort employees by their EmployeeID
 	sort.Slice(employees, func(i, j int) bool {
-		return employees[i].ID < employees[j].ID
+		return employees[i].EmployeeID < employees[j].EmployeeID
 	})
 
 	if startIndex < len(employees) {

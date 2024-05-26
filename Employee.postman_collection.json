@@ -180,7 +180,7 @@
 	"variable": [
 		{
 			"key": "localhost",
-			"value": "http://localhost:8080",
+			"value": "http://localhost:8000",
 			"type": "string"
 		}
 	]

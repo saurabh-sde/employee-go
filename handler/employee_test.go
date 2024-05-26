@@ -67,8 +67,8 @@ func TestCreateEmployee(t *testing.T) {
 						t.Errorf("Error decoding response body: %v", err)
 					}
 					fmt.Println("added employee: ", emp)
-					if emp.ID != tt.expectedID {
-						t.Errorf("Expected employee ID %d but got %d", tt.expectedID, emp.ID)
+					if emp.EmployeeID != tt.expectedID {
+						t.Errorf("Expected employee ID %d but got %d", tt.expectedID, emp.EmployeeID)
 					}
 				} else {
 					t.Error("ResponseRecorder not available")
