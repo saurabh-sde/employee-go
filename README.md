@@ -47,8 +47,12 @@ Requirements:
 - Implement proper error handling and response formatting for the API endpoints
 
 # Updated 
-## 1. Replaced Mux with Gin
+## 1. Added Mux and Gin
 ## 2. Added Air for auto live reload on save
+
+# Updated 2
+## 1. Used Mongo DB for Gin apis
+## 2. Create Docker setup
 
 ### Setup - Auto Reloading Server
 1. Clone repo and run `go mod tidy`
@@ -57,4 +61,8 @@ Requirements:
 
 ### Setup - Manaul Server Update
 1. Clone repo and run `go mod tidy`
-3. run `go run main.go` in project root directory 
+2. run `go run main.go` in project root directory
+
+### Setup - using Docker local build
+1. Clone repo and install docker
+2. Run `docker-compose up --build`
